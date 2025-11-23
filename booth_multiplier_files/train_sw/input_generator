@@ -1,0 +1,54 @@
+from tensorflow.keras.datasets import mnist # type: ignore
+import numpy as np
+
+# Load MNIST from Keras (60k train, 10k test)
+(x_all, y_all), (x_test, y_test) = mnist.load_data()
+
+# Shuffle and split into 50k train / 10k validation
+np.random.seed(42)
+indices = np.random.permutation(len(x_all))
+train_idx, val_idx = indices[:50000], indices[50000:]
+train_images, train_labels = x_all[train_idx], y_all[train_idx]
+val_images,   val_labels   = x_all[val_idx],   y_all[val_idx]
+test_images,  test_labels  = x_test,           y_test
+
+def pixel_to_fixed_bin(p, n, x):
+    sign = 0                            # 0 = non-negative
+    int_bits = x - 1
+    frac_bits = n - x
+    
+    # Integer part (divide by 2^(x-1))
+    int_part = p >> int_bits
+    if int_part >= (1 << int_bits):
+        int_part = (1 << int_bits) - 1  # saturate if overflow
+    
+    # Fractional part
+    frac_value = p / (2**int_bits) - int_part
+    frac_int = round(frac_value * (2**frac_bits))
+    if frac_int >= (1 << frac_bits):
+        frac_int = (1 << frac_bits) - 1
+    
+    # Format bits to strings
+    sign_str = '0'  # since p >= 0
+    int_str  = format(int_part, f'0{int_bits}b')
+    frac_str = format(frac_int, f'0{frac_bits}b')
+    return sign_str + int_str + frac_str
+
+n_bits = 11
+x_bits = 5
+
+def image_to_binary_line(image, label, n_bits, x_bits):
+    flat = image.flatten()
+    bits = [pixel_to_fixed_bin(int(p), n_bits, x_bits) for p in flat]
+    label_bits = format(int(label), '04b')
+    return ''.join(bits) + label_bits
+
+# Write train, validation, and test files
+with open('train_bin.txt','w') as f_tr, open('val_bin.txt','w') as f_val, open('test_bin.txt','w') as f_te:
+    for img, lbl in zip(train_images, train_labels):
+        f_tr.write(image_to_binary_line(img, lbl, n_bits, x_bits) + '\n')
+    for img, lbl in zip(val_images, val_labels):
+        f_val.write(image_to_binary_line(img, lbl, n_bits, x_bits) + '\n')
+    for img, lbl in zip(test_images, test_labels):
+        f_te.write(image_to_binary_line(img, lbl, n_bits, x_bits) + '\n')
+

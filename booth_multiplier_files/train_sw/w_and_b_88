@@ -1,0 +1,89 @@
+import numpy as np
+from tensorflow.keras.models import Sequential # type: ignore
+from tensorflow.keras.layers import Dense # type: ignore
+from tensorflow.keras.utils import to_categorical # type: ignore
+from tensorflow.keras.optimizers import Adam # type: ignore
+import matplotlib.pyplot as plt
+
+# ---------- PARAMETERS ----------
+input_dim = 64
+hidden_dim = 30
+output_dim = 10
+n_w, x_w = 11, 5   # Q5.6 for weights
+n_b, x_b = 22, 10  # Q10.12 for biases
+
+# ---------- FIXED-POINT HELPERS ----------
+def fixed_bin_to_float(bin_str, n, x):
+    val = int(bin_str, 2)
+    if bin_str[0] == '1':
+        val -= (1 << n)
+    return val / (2 ** (n - x))
+
+def float_to_fixed_bin(val, n, x):
+    frac_bits = n - x
+    scale = 2 ** frac_bits
+    max_val = (2 ** (x - 1)) - 1 / scale
+    min_val = -1 * (2 ** (x - 1))
+    val = min(max(val, min_val), max_val)
+    scaled = int(round(val * scale))
+    if scaled < 0:
+        scaled = (1 << n) + scaled
+    return format(scaled, f'0{n}b')
+
+# ---------- LOAD TRAINING DATA ----------
+X = []
+y = []
+
+with open("train_8x8.txt", "r") as f:
+    for line in f:
+        line = line.strip()
+        pixel_bits = line[:-4]
+        label_bits = line[-4:]
+        image = [fixed_bin_to_float(pixel_bits[i*11:(i+1)*11], n_w, x_w) for i in range(input_dim)]
+        label = int(label_bits, 2)
+        X.append(image)
+        y.append(label)
+
+X = np.array(X, dtype=np.float32)
+y = np.array(y, dtype=np.int32)
+y_cat = to_categorical(y, num_classes=output_dim)
+
+# ---------- BUILD & TRAIN MODEL ----------
+model = Sequential()
+model.add(Dense(hidden_dim, input_dim=input_dim, activation='relu'))
+model.add(Dense(output_dim, activation='softmax'))
+
+model.compile(optimizer=Adam(learning_rate=0.003), loss='categorical_crossentropy', metrics=['accuracy'])
+history = model.fit(
+    X, y_cat,
+    epochs=60,
+    batch_size=4,
+    verbose=1
+)
+
+# ---------- PLOT LOSS ----------
+plt.figure(figsize=(8, 5))
+plt.plot(history.history['loss'], label='Training Loss', color='red', linewidth=2)
+plt.xlabel('Epoch')
+plt.ylabel('Loss')
+plt.title('Training Loss Curve')
+plt.grid(True)
+plt.legend()
+plt.tight_layout()
+plt.show()
+
+
+
+# ---------- EXPORT WEIGHTS & BIASES ----------
+for layer_idx, layer in enumerate(model.layers):
+    weights, biases = layer.get_weights()
+    weights = weights.T  # shape: (out_dim, in_dim)
+
+    with open(f"layer{layer_idx+1}_weights.txt", "w") as wf:
+        for row in weights:
+            bin_row = ''.join([float_to_fixed_bin(w, n_w, x_w) for w in row])
+            wf.write(bin_row + "\n")
+
+    with open(f"layer{layer_idx+1}_biases.txt", "w") as bf:
+        for b in biases:
+            bf.write(float_to_fixed_bin(b, n_b, x_b) + "\n")

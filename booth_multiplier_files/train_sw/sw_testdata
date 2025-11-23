@@ -1,0 +1,81 @@
+import numpy as np
+
+# Parameters (must match training setup)
+layer_dims = [784, 50, 30, 10]
+n_w, x_w = 11, 5   # Q5.6 for weights
+n_b, x_b = 22, 10  # Q10.12 for biases
+
+# ---------- Fixed-Point Utilities ----------
+def fixed_bin_to_float(bin_str, n, x):
+    val = int(bin_str, 2)
+    if bin_str[0] == '1':
+        val -= (1 << n)
+    return val / (2 ** (n - x))
+
+def relu(x):
+    return np.maximum(0, x)
+
+def softmax(x):
+    e_x = np.exp(x - np.max(x))  # stability
+    return e_x / np.sum(e_x)
+
+# ---------- Load Weights & Biases ----------
+weights = []
+biases = []
+
+for i in range(1, len(layer_dims)):
+    in_dim = layer_dims[i - 1]
+    out_dim = layer_dims[i]
+
+    # Load weights
+    with open(f'layer{i}_weights.txt', 'r') as wf:
+        w_layer = []
+        for line in wf:
+            row = [fixed_bin_to_float(line[j*11:(j+1)*11], n_w, x_w) for j in range(in_dim)]
+            w_layer.append(row)
+        weights.append(np.array(w_layer))  # shape: (out_dim, in_dim)
+
+    # Load biases
+    with open(f'layer{i}_biases.txt', 'r') as bf:
+        b_layer = [fixed_bin_to_float(line.strip(), n_b, x_b) for line in bf]
+        biases.append(np.array(b_layer))  # shape: (out_dim,)
+
+# ---------- Load Test Data ----------
+X_test = []
+y_test = []
+
+with open("test_bin.txt", "r") as f:
+    for line in f:
+        line = line.strip()
+        pixel_bits = line[:-4]
+        label_bits = line[-4:]
+
+        image = [fixed_bin_to_float(pixel_bits[i*11:(i+1)*11], n_w, x_w) for i in range(784)]
+        label = int(label_bits, 2)
+
+        X_test.append(image)
+        y_test.append(label)
+
+X_test = np.array(X_test, dtype=np.float32)
+y_test = np.array(y_test, dtype=np.int32)
+
+# ---------- Inference ----------
+correct = 0
+total = len(X_test)
+
+for idx in range(total):
+    x = X_test[idx]
+
+    for l in range(len(weights)):
+        x = np.dot(weights[l], x) + biases[l]
+        if l < len(weights) - 1:
+            x = relu(x)
+        else:
+            x = softmax(x)
+
+    pred = np.argmax(x)
+    if pred == y_test[idx]:
+        correct += 1
+
+accuracy = correct / total * 100
+print(f"Test Accuracy: {accuracy:.2f}%")

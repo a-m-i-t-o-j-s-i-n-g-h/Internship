@@ -1,0 +1,85 @@
+import numpy as np
+from tensorflow.keras.models import Sequential # type: ignore
+from tensorflow.keras.layers import Dense # type: ignore
+from tensorflow.keras.utils import to_categorical # type: ignore
+from    import Adam # type: ignore
+
+# ---------- PARAMETERS ----------
+# Network structure
+layer_dims = [784, 50, 30, 10]
+
+# Fixed-point formats
+n_w, x_w = 11, 5  # Weights: total bits, integer bits (Q5.6)
+n_b, x_b = 22, 10 # Biases: total bits, integer bits (Q10.12)
+
+# ---------- HELPER FUNCTIONS ----------
+def fixed_bin_to_float(bin_str, n, x):
+    """Convert fixed-point binary string to float."""
+    val = int(bin_str, 2)
+    if bin_str[0] == '1':  # negative number in two's complement
+        val -= (1 << n)
+    return val / (2 ** (n - x))
+
+def float_to_fixed_bin(val, n, x):
+    """Convert float to signed fixed-point binary string."""
+    frac_bits = n - x
+    scale = 2 ** frac_bits
+    max_val = (2 ** (x - 1)) - 1 / scale
+    min_val = -1 * (2 ** (x - 1))
+    val = min(max(val, min_val), max_val)  # clamp
+    scaled = int(round(val * scale))
+    if scaled < 0:
+        scaled = (1 << n) + scaled  # two's complement
+    return format(scaled, f'0{n}b')
+
+# ---------- LOAD DATA ----------
+X = []
+y = []
+
+with open("train_bin.txt", "r") as f:
+    for line in f:
+        line = line.strip()
+        pixel_bits = line[:-4]
+        label_bits = line[-4:]
+
+        # 784 values × 11 bits each
+        img = [fixed_bin_to_float(pixel_bits[i*11:(i+1)*11], n_w, x_w) for i in range(784)]
+        label = int(label_bits, 2)
+
+        X.append(img)
+        y.append(label)
+
+X = np.array(X, dtype=np.float32)
+y = np.array(y, dtype=np.int32)
+y_cat = to_categorical(y, num_classes=10)
+
+# ---------- BUILD MODEL ----------
+model = Sequential()
+for i in range(1, len(layer_dims)):
+    out_dim = layer_dims[i]
+    if i == 1:
+        model.add(Dense(out_dim, input_dim=layer_dims[0], activation='relu'))
+    elif i == len(layer_dims) - 1:
+        model.add(Dense(out_dim, activation='softmax'))
+    else:
+        model.add(Dense(out_dim, activation='relu'))
+
+model.compile(optimizer=Adam(), loss='categorical_crossentropy', metrics=['accuracy'])
+model.fit(X, y_cat, epochs=10, batch_size=64, verbose=1)
+
+# ---------- EXPORT WEIGHTS & BIASES ----------
+for i, layer in enumerate(model.layers):
+    weights, biases = layer.get_weights()  # (in_dim, out_dim), (out_dim,)
+    weights = weights.T  # now (out_dim, in_dim)
+
+    # Save weights
+    with open(f"layer{i+1}_weights.txt", "w") as wf:
+        for row in weights:
+            bin_row = ''.join([float_to_fixed_bin(w, n_w, x_w) for w in row])
+            wf.write(bin_row + "\n")
+
+    # Save biases
+    with open(f"layer{i+1}_biases.txt", "w") as bf:
+        for b in biases:
+            bin_bias = float_to_fixed_bin(b, n_b, x_b)
+            bf.write(bin_bias + "\n")
